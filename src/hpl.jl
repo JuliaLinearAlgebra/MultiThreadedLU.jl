@@ -3,6 +3,8 @@
 ## Based on "Multi-Threading and One-Sided Communication in Parallel LU Factorization"
 ## http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.138.4361&rank=7
 
+using Distributed, LinearAlgebra
+
 function hpl_seq(A::Matrix, b::Vector)
 
     blocksize = 5
@@ -10,9 +12,9 @@ function hpl_seq(A::Matrix, b::Vector)
     n = size(A,1)
     A = [A b]
 
-    B_rows = linspace(0, n, div(n,blocksize)+1)
+    B_rows = collect(range(0, n, step=div(n,blocksize)+1))
     B_rows[end] = n
-    B_cols = [B_rows, [n+1]]
+    B_cols = [B_rows; [n+1]]
     nB = length(B_rows)
     depend = zeros(Bool, nB, nB) # In parallel, depend needs to be able to hold futures
 
@@ -53,14 +55,15 @@ end ## hpl()
 ### Panel factorization ###
 
 function panel_factor_seq(A, I, col_dep)
-    n = size (A, 1)
+    println("P")
+    n = size(A, 1)
 
     ## Enforce dependencies
     #wait(col_dep)
 
     ## Factorize a panel
     K = I[1]:n
-    panel_p = lufact!(sub(A, K, I))[:p] # Economy mode
+    panel_p = lu!(view(A, K, I)).p
 
     ## Panel permutation
     panel_p = K[panel_p]
@@ -73,8 +76,8 @@ end ## panel_factor_seq()
 ### Trailing update ###
 
 function trailing_update_seq(A, I, J, panel_p, row_dep, col_dep)
-
-    n = size (A, 1)
+    println("T")
+    n = size(A, 1)
 
     ## Enforce dependencies
     #wait(row_dep, col_dep)
@@ -84,7 +87,7 @@ function trailing_update_seq(A, I, J, panel_p, row_dep, col_dep)
     A[I[1]:n, J] = A[panel_p, J]
 
     ## Compute blocks of U
-    L = tril(A[I,I],-1) + eye(length(I))
+    L = tril(A[I,I],-1) + LinearAlgebra.I
     A[I, J] = L \ A[I, J]
 
     ## Trailing submatrix update
@@ -113,7 +116,7 @@ function hpl_par(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
        throw(ArgumentError("hpl_par: invalid blocksize: $blocksize < 1"))
     end
 
-    B_rows = linspace(0, n, div(n,blocksize)+1)
+    B_rows = range(0, n, div(n,blocksize)+1)
     B_rows[end] = n
     B_cols = [B_rows, [n+1]]
     nB = length(B_rows)
