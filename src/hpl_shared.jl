@@ -131,10 +131,10 @@ hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),
 
 hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, true)
 
-a = rand(1000,1000);
-b = rand(1000);
+a = rand(4096,4096);
+b = rand(4096);
 
-x=hpl_shared(a, b, 128);
-@time x=hpl_shared(a, b, 128);
+x=hpl_shared(a, b, 512);
+@time x=hpl_shared(a, b, 512);
 
 @show norm(a*x-b)
