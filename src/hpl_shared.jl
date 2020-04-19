@@ -34,7 +34,8 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
         ## Threads for panel factorizations
         I = (B_rows[i]+1):B_rows[i+1]
         K = I[1]:n
-        (A_KI, panel_p) = panel_factor_par((@view A[K,I]), depend[i,i])
+        A_KI = @view A[K,I]
+        panel_p = panel_factor!(A_KI, depend[i,i])
 
         ## Write the factorized panel back to A
         A[K,I] = A_KI
@@ -56,13 +57,14 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
             J = (B_cols[j]+1):B_cols[j+1]
 
             ## Do the trailing update (Compute U, and DGEMM - all flops are here)
+            A_IJ = @view A[I,J]
+            A_KJ = @view A[K,J]
             if run_parallel
-                A_IJ = @view A[I,J]
-                #A_KI = A[K,I]
-                A_KJ = @view A[K,J]
-                depend[i+1,j] = Threads.@spawn trailing_update_par(L_II, A_IJ, A_KI, A_KJ, depend[i+1,i], depend[i,j])
+                depend[i+1,j] = Threads.@spawn trailing_update!(L_II, A_IJ, A_KI, A_KJ,
+                                                                depend[i+1,i], depend[i,j])
             else
-                depend[i+1,j] = trailing_update_par(L_II, A[I,J], A[K,I], A[K,J], depend[i+1,i], depend[i,j])
+                depend[i+1,j] = trailing_update!(L_II, A_IJ, A_KI, A_KJ,
+                                                 depend[i+1,i], depend[i,j])
             end
         end
 
@@ -94,22 +96,20 @@ end ## hpl()
 
 ### Panel factorization ###
 
-function panel_factor_par(A_KI, col_dep)
+function panel_factor!(A_KI, col_dep)
 
     @assert col_dep
 
     ## Factorize a panel
     panel_p = lu!(A_KI).p
 
-    return (A_KI, panel_p)
-
 end ## panel_factor_par()
 
 
 ### Trailing update ###
 
-function trailing_update_par(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
-    #println(Threads.threadid())
+function trailing_update!(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
+
     @assert row_dep
     @assert col_dep
 
@@ -125,9 +125,16 @@ function trailing_update_par(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
     end
 
     return (A_IJ, A_KJ)
-
 end ## trailing_update_par()
 
 hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), true)
 
 hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, true)
+
+a = rand(1000,1000);
+b = rand(1000);
+
+x=hpl_shared(a, b, 128);
+@time x=hpl_shared(a, b, 128);
+
+@show norm(a*x-b)
