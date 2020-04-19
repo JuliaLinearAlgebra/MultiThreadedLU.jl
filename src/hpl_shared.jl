@@ -2,24 +2,22 @@
 # The matrix A is local to the first Worker, which allocates work to other Workers
 # All updates to A are carried out by the first Worker. Thus A is not distributed
 
-hpl_par(A::Matrix, b::Vector) = hpl_par(A, b, max(1, div(max(size(A)),4)), true)
+using LinearAlgebra
 
-hpl_par(A::Matrix, b::Vector, bsize::Integer) = hpl_par(A, b, bsize, true)
-
-function hpl_par(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
+function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
 
     n = size(A,1)
     A = [A b]
 
     if blocksize < 1
-       throw(ArgumentError("hpl_par: invalid blocksize: $blocksize < 1"))
+       throw(ArgumentError("hpl_shared: invalid blocksize: $blocksize < 1"))
     end
 
-    B_rows = range(0, n, div(n,blocksize)+1)
+    B_rows = collect(range(0, n, step=blocksize))
     B_rows[end] = n
-    B_cols = [B_rows, [n+1]]
+    B_cols = [B_rows; [n+1]]
     nB = length(B_rows)
-    depend = cell(nB, nB)
+    depend =  Array{Any}(undef, nB, nB)
 
     ## Small matrix case
     if nB <= 1
@@ -36,7 +34,7 @@ function hpl_par(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
         ## Threads for panel factorizations
         I = (B_rows[i]+1):B_rows[i+1]
         K = I[1]:n
-        (A_KI, panel_p) = panel_factor_par(A[K,I], depend[i,i])
+        (A_KI, panel_p) = panel_factor_par((@view A[K,I]), depend[i,i])
 
         ## Write the factorized panel back to A
         A[K,I] = A_KI
@@ -47,22 +45,22 @@ function hpl_par(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
 
         ## Apply permutation from pivoting
         J = (B_cols[i+1]+1):B_cols[nB+1]
-        A[K, J] = A[panel_p, J]
+        A[K, J] = @view A[panel_p, J]
         ## Threads for trailing updates
-        #L_II = tril(A[I,I], -1) + eye(length(I))
-        L_II = tril(sub(A,I,I), -1) + eye(length(I))
+        #L_II = tril(A[I,I], -1) + LinearAlgebra.I
+        L_II = UnitLowerTriangular(@view A[I,I])
         K = (I[length(I)]+1):n
-        A_KI = A[K,I]
+        A_KI = @view A[K,I]
 
         for j=(i+1):nB
             J = (B_cols[j]+1):B_cols[j+1]
 
             ## Do the trailing update (Compute U, and DGEMM - all flops are here)
             if run_parallel
-                A_IJ = A[I,J]
+                A_IJ = @view A[I,J]
                 #A_KI = A[K,I]
-                A_KJ = A[K,J]
-                depend[i+1,j] = @spawn trailing_update_par(L_II, A_IJ, A_KI, A_KJ, depend[i+1,i], depend[i,j])
+                A_KJ = @view A[K,J]
+                depend[i+1,j] = Threads.@spawn trailing_update_par(L_II, A_IJ, A_KI, A_KJ, depend[i+1,i], depend[i,j])
             else
                 depend[i+1,j] = trailing_update_par(L_II, A[I,J], A[K,I], A[K,J], depend[i+1,i], depend[i,j])
             end
@@ -101,7 +99,7 @@ function panel_factor_par(A_KI, col_dep)
     @assert col_dep
 
     ## Factorize a panel
-    panel_p = lufact!(A_KI)[:p] # Economy mode
+    panel_p = lu!(A_KI).p
 
     return (A_KI, panel_p)
 
@@ -111,7 +109,7 @@ end ## panel_factor_par()
 ### Trailing update ###
 
 function trailing_update_par(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
-
+    #println(Threads.threadid())
     @assert row_dep
     @assert col_dep
 
@@ -122,10 +120,14 @@ function trailing_update_par(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
     if !isempty(A_KJ)
         m, k = size(A_KI)
         n = size(A_IJ,2)
-        blas_gemm('N','N',m,n,k,-1.0,A_KI,m,A_IJ,k,1.0,A_KJ,m)
+        BLAS.gemm!('N','N',-1.0,A_KI,A_IJ,1.0,A_KJ)
         #A_KJ = A_KJ - A_KI*A_IJ
     end
 
     return (A_IJ, A_KJ)
 
 end ## trailing_update_par()
+
+hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), true)
+
+hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, true)

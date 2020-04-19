@@ -12,7 +12,7 @@ function hpl_seq(A::Matrix, b::Vector)
     n = size(A,1)
     A = [A b]
 
-    B_rows = collect(range(0, n, step=div(n,blocksize)+1))
+    B_rows = collect(range(0, n, step=blocksize))
     B_rows[end] = n
     B_cols = [B_rows; [n+1]]
     nB = length(B_rows)
