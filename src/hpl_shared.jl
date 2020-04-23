@@ -37,21 +37,24 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
         A_KI = @view A[K,I]
         panel_p = panel_factor!(A_KI, depend[i,i])
 
-        ## Write the factorized panel back to A
-        A[K,I] = A_KI
-
         ## Panel permutation
         panel_p = K[panel_p]
         depend[i+1,i] = true
 
         ## Apply permutation from pivoting
         J = (B_cols[i+1]+1):B_cols[nB+1]
-        A[K, J] = @view A[panel_p, J]
+
+        ## Swap (Use DLASWP to avoid allocation)
+        A[K, J] = A[panel_p, J]
+        
         ## Threads for trailing updates
         #L_II = tril(A[I,I], -1) + LinearAlgebra.I
         L_II = UnitLowerTriangular(@view A[I,I])
         K = (I[length(I)]+1):n
         A_KI = @view A[K,I]
+
+        ## Compute all blocks of U
+        ldiv!(L_II, @view A[I,J])
 
         for j=(i+1):nB
             J = (B_cols[j]+1):B_cols[j+1]
@@ -59,25 +62,19 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
             ## Do the trailing update (Compute U, and DGEMM - all flops are here)
             A_IJ = @view A[I,J]
             A_KJ = @view A[K,J]
+
             if run_parallel
-                depend[i+1,j] = Threads.@spawn trailing_update!(L_II, A_IJ, A_KI, A_KJ,
-                                                                depend[i+1,i], depend[i,j])
+                depend[i+1,j] = Threads.@spawn trailing_update!($A_IJ, $A_KI, $A_KJ,
+                                                                $depend[i+1,i], $depend[i,j])
             else
-                depend[i+1,j] = trailing_update!(L_II, A_IJ, A_KI, A_KJ,
+                depend[i+1,j] = trailing_update!(A_IJ, A_KI, A_KJ,
                                                  depend[i+1,i], depend[i,j])
             end
         end
 
         # Wait for all trailing updates to complete, and write back to A
         for j=(i+1):nB
-            J = (B_cols[j]+1):B_cols[j+1]
-            if run_parallel
-                (A_IJ, A_KJ) = fetch(depend[i+1,j])
-            else
-                (A_IJ, A_KJ) = depend[i+1,j]
-            end
-            A[I,J] = A_IJ
-            A[K,J] = A_KJ
+            run_parallel && fetch(depend[i+1,j])
             depend[i+1,j] = true
         end
 
@@ -87,7 +84,7 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
     @assert depend[nB, nB]
 
     ## Solve the triangular system
-    x = triu(A[1:n,1:n]) \ A[:,n+1]
+    x = UpperTriangular(@view A[1:n,1:n]) \ @view A[:,n+1]
 
     return x
 
@@ -108,33 +105,26 @@ end ## panel_factor_par()
 
 ### Trailing update ###
 
-function trailing_update!(L_II, A_IJ, A_KI, A_KJ, row_dep, col_dep)
+function trailing_update!(A_IJ, A_KI, A_KJ, row_dep, col_dep)
 
     @assert row_dep
     @assert col_dep
 
-    ## Compute blocks of U
-    A_IJ = L_II \ A_IJ
-
     ## Trailing submatrix update - All flops are here
-    if !isempty(A_KJ)
-        m, k = size(A_KI)
-        n = size(A_IJ,2)
-        BLAS.gemm!('N','N',-1.0,A_KI,A_IJ,1.0,A_KJ)
-        #A_KJ = A_KJ - A_KI*A_IJ
-    end
+    #A_KJ = A_KJ - A_KI*A_IJ
+    !isempty(A_KJ) && BLAS.gemm!('N','N',-1.0,A_KI,A_IJ,1.0,A_KJ)
 
-    return (A_IJ, A_KJ)
 end ## trailing_update_par()
 
-hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), true)
+par = false
+hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
 
-hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, true)
+hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, par)
 
 a = rand(4096,4096);
 b = rand(4096);
 
-x=hpl_shared(a, b, 512);
-@time x=hpl_shared(a, b, 512);
+x=hpl_shared(a, b, 256);
+@time x=hpl_shared(a, b, 256);
 
 @show norm(a*x-b)
