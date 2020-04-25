@@ -3,9 +3,11 @@
 # All updates to A are carried out by the first Worker. Thus A is not distributed
 
 using LinearAlgebra, LinearAlgebra.BLAS
+using Printf
 
 function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
-
+    global tseq
+    
     n = size(A,1)
     A = [A b]
 
@@ -29,34 +31,38 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
     for j=1:nB; depend[1,j] = true; end
     for i=2:nB, j=1:nB; depend[i,j] = false; end
 
+    tseq=0
+    
     for i=1:(nB-1)
         #println("A=$A") #####
         ## Threads for panel factorizations
-        I = (B_rows[i]+1):B_rows[i+1]
-        K = I[1]:n
-        A_KI = @view A[K,I]
-        panel_p = panel_factor!(A_KI, depend[i,i])
+        tseq += @elapsed begin
+            I = (B_rows[i]+1):B_rows[i+1]
+            K = I[1]:n
+            A_KI = @view A[K,I]
+            panel_p = panel_factor!(A_KI, depend[i,i])
 
-        ## Panel permutation
-        #panel_p = K[panel_p]
-        depend[i+1,i] = true
+            ## Panel permutation
+            #panel_p = K[panel_p]
+            depend[i+1,i] = true
 
-        ## Apply permutation from pivoting
-        J = (B_cols[i+1]+1):B_cols[nB+1]
+            ## Apply permutation from pivoting
+            J = (B_cols[i+1]+1):B_cols[nB+1]
 
-        ## Swap (Use DLASWP to avoid allocation)
-        #A[K, J] = A[panel_p, J]
-        dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
-                
-        ## Threads for trailing updates
-        #L_II = tril(A[I,I], -1) + LinearAlgebra.I
-        L_II = UnitLowerTriangular(@view A[I,I])
-        K = (I[length(I)]+1):n
-        A_KI = @view A[K,I]
+            ## Swap (Use DLASWP to avoid allocation)
+            #A[K, J] = A[panel_p, J]
+            dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
+            
+            ## Threads for trailing updates
+            #L_II = tril(A[I,I], -1) + LinearAlgebra.I
+            L_II = UnitLowerTriangular(@view A[I,I])
+            K = (I[length(I)]+1):n
+            A_KI = @view A[K,I]
 
-        ## Compute all blocks of U
-        ldiv!(L_II, @view A[I,J])
- 
+            ## Compute all blocks of U
+            ldiv!(L_II, @view A[I,J])
+        end
+
         for j=(i+1):nB
             J = (B_cols[j]+1):B_cols[j+1]
 
@@ -126,14 +132,16 @@ function dlaswp!(A::AbstractMatrix, ipiv::AbstractVector)
           
 end
 
-par = true
 hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
-hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, par)
 
-a = rand(4096,4096);
-b = rand(4096);
+par = true
+n = 4096
+blocksize=64
 
-x=hpl_shared(a, b, 256);
-@time x=hpl_shared(a, b, 256);
-
+tseq=0.
+a = rand(n,n);
+b = rand(n);
+x = hpl_shared(a, b, blocksize, par);
+@printf "Total time = %4.2f sec\n" @elapsed x = hpl_shared(a, b, blocksize, par);
+@printf "  Seq time = %4.2f sec\n" tseq
 @show norm(a*x-b)
