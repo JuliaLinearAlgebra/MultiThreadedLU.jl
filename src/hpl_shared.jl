@@ -2,7 +2,7 @@
 # The matrix A is local to the first Worker, which allocates work to other Workers
 # All updates to A are carried out by the first Worker. Thus A is not distributed
 
-using LinearAlgebra
+using LinearAlgebra, LinearAlgebra.BLAS
 
 function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
 
@@ -38,15 +38,16 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
         panel_p = panel_factor!(A_KI, depend[i,i])
 
         ## Panel permutation
-        panel_p = K[panel_p]
+        #panel_p = K[panel_p]
         depend[i+1,i] = true
 
         ## Apply permutation from pivoting
         J = (B_cols[i+1]+1):B_cols[nB+1]
 
         ## Swap (Use DLASWP to avoid allocation)
-        A[K, J] = A[panel_p, J]
-        
+        #A[K, J] = A[panel_p, J]
+        dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
+                
         ## Threads for trailing updates
         #L_II = tril(A[I,I], -1) + LinearAlgebra.I
         L_II = UnitLowerTriangular(@view A[I,I])
@@ -55,7 +56,7 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
 
         ## Compute all blocks of U
         ldiv!(L_II, @view A[I,J])
-
+ 
         for j=(i+1):nB
             J = (B_cols[j]+1):B_cols[j+1]
 
@@ -98,7 +99,7 @@ function panel_factor!(A_KI, col_dep)
     @assert col_dep
 
     ## Factorize a panel
-    panel_p = lu!(A_KI).p
+    panel_p = lu!(A_KI).ipiv
 
 end ## panel_factor_par()
 
@@ -115,6 +116,15 @@ function trailing_update!(A_IJ, A_KI, A_KJ, row_dep, col_dep)
     !isempty(A_KJ) && BLAS.gemm!('N','N',-1.0,A_KI,A_IJ,1.0,A_KJ)
 
 end ## trailing_update_par()
+
+function dlaswp!(A::AbstractMatrix, ipiv::AbstractVector)
+
+    ccall((:dlaswp_64_, :libopenblas64_),  Cvoid,
+          (Ref{Int64}, Ptr{Float64}, Ref{Int64}, Ref{Int64}, Ref{Int64},
+           Ref{Int64}, Ref{Int64}),
+          size(A,2), A, max(1,stride(A,2)), 1, length(ipiv), ipiv, 1)
+          
+end
 
 par = false
 hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
