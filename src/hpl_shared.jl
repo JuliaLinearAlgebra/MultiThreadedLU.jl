@@ -126,9 +126,8 @@ function dlaswp!(A::AbstractMatrix, ipiv::AbstractVector)
           
 end
 
-par = false
+par = true
 hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
-
 hpl_shared(A::Matrix, b::Vector, bsize::Integer) = hpl_shared(A, b, bsize, par)
 
 a = rand(4096,4096);
