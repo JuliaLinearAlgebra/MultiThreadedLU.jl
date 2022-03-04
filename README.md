@@ -2,6 +2,13 @@
 
 A multi-threaded LU implementation.
 
+Install and test:
+```
+using Pkg
+Pkg.add("https://github.com/ViralBShah/MultiThreadedLU.jl.git")
+Pkg.test("MultiThreadedLU")
+```
+
 Example:
 ```
 using MultiThreadedLU, Random, LinearAlgebra
