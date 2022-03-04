@@ -1,1 +1,1 @@
-# HPL.jl
+# MultiThreadedLU.jl
