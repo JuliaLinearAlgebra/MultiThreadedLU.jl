@@ -4,7 +4,7 @@
 
 using LinearAlgebra.BLAS: @blasfunc, BlasInt
 
-hpl_mt(A::Matrix, b::Vector) = hpl_mt(A, b, 32, false)
+hpl_mt(A::Matrix, b::Vector) = hpl_mt(A, b, 32, true)
 
 function hpl_mt(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
     n = size(A,1)
