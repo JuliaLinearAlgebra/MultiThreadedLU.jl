@@ -2,12 +2,11 @@
 # The matrix A is local to the first Worker, which allocates work to other Workers
 # All updates to A are carried out by the first Worker. Thus A is not distributed
 
-using LinearAlgebra, LinearAlgebra.BLAS
-using Printf
+hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
 
 function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
     global tseq
-    
+
     n = size(A,1)
     A = [A b]
 
@@ -32,7 +31,7 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
     for i=2:nB, j=1:nB; depend[i,j] = false; end
 
     tseq=0
-    
+
     for i=1:(nB-1)
         #println("A=$A") #####
         ## Threads for panel factorizations
@@ -52,7 +51,7 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
             ## Swap (Use DLASWP to avoid allocation)
             #A[K, J] = A[panel_p, J]
             dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
-            
+
             ## Threads for trailing updates
             #L_II = tril(A[I,I], -1) + LinearAlgebra.I
             L_II = UnitLowerTriangular(@view A[I,I])
@@ -129,19 +128,5 @@ function dlaswp!(A::AbstractMatrix, ipiv::AbstractVector)
           (Ref{Int64}, Ptr{Float64}, Ref{Int64}, Ref{Int64}, Ref{Int64},
            Ref{Int64}, Ref{Int64}),
           size(A,2), A, max(1,stride(A,2)), 1, length(ipiv), ipiv, 1)
-          
+
 end
-
-hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
-
-par = true
-n = 4096
-blocksize=64
-
-tseq=0.
-a = rand(n,n);
-b = rand(n);
-x = hpl_shared(a, b, blocksize, par);
-@printf "Total time = %4.2f sec\n" @elapsed x = hpl_shared(a, b, blocksize, par);
-@printf "  Seq time = %4.2f sec\n" tseq
-@show norm(a*x-b)

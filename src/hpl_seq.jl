@@ -3,8 +3,6 @@
 ## Based on "Multi-Threading and One-Sided Communication in Parallel LU Factorization"
 ## http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.138.4361&rank=7
 
-using Distributed, LinearAlgebra
-
 function hpl_seq(A::Matrix, b::Vector)
 
     blocksize = 5
@@ -98,5 +96,3 @@ function trailing_update_seq(A, I, J, panel_p, row_dep, col_dep)
     return true
 
 end ## trailing_update_seq()
-
-
