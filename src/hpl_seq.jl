@@ -3,10 +3,9 @@
 ## Based on "Multi-Threading and One-Sided Communication in Parallel LU Factorization"
 ## http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.138.4361&rank=7
 
-function hpl_seq(A::Matrix, b::Vector)
+hpl_seq(A, b) = hpl_seq(A, b, 32)
 
-    blocksize = 5
-
+function hpl_seq(A::Matrix, b::Vector, blocksize::Integer)
     n = size(A,1)
     A = [A b]
 
@@ -53,7 +52,6 @@ end ## hpl()
 ### Panel factorization ###
 
 function panel_factor_seq(A, I, col_dep)
-    println("P")
     n = size(A, 1)
 
     ## Enforce dependencies
@@ -74,7 +72,6 @@ end ## panel_factor_seq()
 ### Trailing update ###
 
 function trailing_update_seq(A, I, J, panel_p, row_dep, col_dep)
-    println("T")
     n = size(A, 1)
 
     ## Enforce dependencies

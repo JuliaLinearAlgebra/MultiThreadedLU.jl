@@ -1,17 +1,16 @@
 using MultiThreadedLU
-using Test
+using Test, Random
 
-@testset "MultiThreadedLU.jl" begin
-    par = true
-    n = 4096
-    blocksize=64
+n = 1024
+a = rand(n,n);
+b = rand(n);
 
-    tseq=0.
-    a = rand(n,n);
-    b = rand(n);
-    x = hpl_shared(a, b, blocksize, par);
-    @printf "Total time = %4.2f sec\n" @elapsed x = hpl_shared(a, b, blocksize, par);
-    @printf "  Seq time = %4.2f sec\n" tseq
+@testset "hpl_seq" begin
+    x = hpl_seq(a, b)
+    @test a*x ≈ b
+end
 
-    @test norm(a*x-b) < 1e-6
+@testset "hpl_mt" begin
+    x = hpl_mt(a, b)
+    @test a*x ≈ b
 end

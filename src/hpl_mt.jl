@@ -2,17 +2,15 @@
 # The matrix A is local to the first Worker, which allocates work to other Workers
 # All updates to A are carried out by the first Worker. Thus A is not distributed
 
-hpl_shared(A::Matrix, b::Vector) = hpl_shared(A, b, max(1, div(maximum(size(A)),4)), par)
+using LinearAlgebra.BLAS: @blasfunc, BlasInt
 
-function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
-    global tseq
+hpl_mt(A::Matrix, b::Vector) = hpl_mt(A, b, 32, false)
 
+function hpl_mt(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool)
     n = size(A,1)
     A = [A b]
 
-    if blocksize < 1
-       throw(ArgumentError("hpl_shared: invalid blocksize: $blocksize < 1"))
-    end
+    blocksize < 1 && throw(ArgumentError("Invalid blocksize: $blocksize < 1"))
 
     B_rows = collect(range(0, n, step=blocksize))
     B_rows[end] = n
@@ -30,37 +28,33 @@ function hpl_shared(A::Matrix, b::Vector, blocksize::Integer, run_parallel::Bool
     for j=1:nB; depend[1,j] = true; end
     for i=2:nB, j=1:nB; depend[i,j] = false; end
 
-    tseq=0
-
     for i=1:(nB-1)
         #println("A=$A") #####
         ## Threads for panel factorizations
-        tseq += @elapsed begin
-            I = (B_rows[i]+1):B_rows[i+1]
-            K = I[1]:n
-            A_KI = @view A[K,I]
-            panel_p = panel_factor!(A_KI, depend[i,i])
+        I = (B_rows[i]+1):B_rows[i+1]
+        K = I[1]:n
+        A_KI = @view A[K,I]
+        panel_p = panel_factor!(A_KI, depend[i,i])
 
-            ## Panel permutation
-            #panel_p = K[panel_p]
-            depend[i+1,i] = true
+        ## Panel permutation
+        #panel_p = K[panel_p]
+        depend[i+1,i] = true
 
-            ## Apply permutation from pivoting
-            J = (B_cols[i+1]+1):B_cols[nB+1]
+        ## Apply permutation from pivoting
+        J = (B_cols[i+1]+1):B_cols[nB+1]
 
-            ## Swap (Use DLASWP to avoid allocation)
-            #A[K, J] = A[panel_p, J]
-            dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
+        ## Swap (Use DLASWP to avoid allocation)
+        #A[K, J] = A[panel_p, J]
+        dlaswp!((@view A[K,J]), (@view panel_p[1:length(I)]))
 
-            ## Threads for trailing updates
-            #L_II = tril(A[I,I], -1) + LinearAlgebra.I
-            L_II = UnitLowerTriangular(@view A[I,I])
-            K = (I[length(I)]+1):n
-            A_KI = @view A[K,I]
+        ## Threads for trailing updates
+        #L_II = tril(A[I,I], -1) + LinearAlgebra.I
+        L_II = UnitLowerTriangular(@view A[I,I])
+        K = (I[length(I)]+1):n
+        A_KI = @view A[K,I]
 
-            ## Compute all blocks of U
-            ldiv!(L_II, @view A[I,J])
-        end
+        ## Compute all blocks of U
+        ldiv!(L_II, @view A[I,J])
 
         for j=(i+1):nB
             J = (B_cols[j]+1):B_cols[j+1]
@@ -100,7 +94,6 @@ end ## hpl()
 ### Panel factorization ###
 
 function panel_factor!(A_KI, col_dep)
-
     @assert col_dep
 
     ## Factorize a panel
@@ -122,11 +115,18 @@ function trailing_update!(A_IJ, A_KI, A_KJ, row_dep, col_dep)
 
 end ## trailing_update_par()
 
-function dlaswp!(A::AbstractMatrix, ipiv::AbstractVector)
 
-    ccall((:dlaswp_64_, :libopenblas64_),  Cvoid,
-          (Ref{Int64}, Ptr{Float64}, Ref{Int64}, Ref{Int64}, Ref{Int64},
-           Ref{Int64}, Ref{Int64}),
-          size(A,2), A, max(1,stride(A,2)), 1, length(ipiv), ipiv, 1)
+for (fname, elty) in ((:dlaswp_, :Float64),
+                      (:slaswp_, :Float32))
 
+    @eval begin
+        function dlaswp!(A::AbstractMatrix{$elty}, ipiv::AbstractVector)
+
+            ccall((@blasfunc($fname), Base.libblas_name),  Cvoid,
+                  (Ref{BlasInt}, Ptr{$elty}, Ref{BlasInt}, Ref{BlasInt}, Ref{BlasInt},
+                   Ref{BlasInt}, Ref{BlasInt}),
+                  size(A,2), A, max(1,stride(A,2)), 1, length(ipiv), ipiv, 1)
+
+        end
+    end
 end
