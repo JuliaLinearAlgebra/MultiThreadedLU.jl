@@ -1,0 +1,13 @@
+name = "MultiThreadedLU"
+uuid = "86668951-7aba-4fe0-850a-0b1f152a5f7a"
+authors = ["Viral B. Shah <viral@mayin.org> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1.7"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
