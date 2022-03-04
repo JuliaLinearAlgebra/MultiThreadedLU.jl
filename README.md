@@ -5,7 +5,7 @@ A multi-threaded LU implementation.
 Install and test:
 ```
 using Pkg
-Pkg.add(url="https://github.com/ViralBShah/MultiThreadedLU.jl")
+Pkg.add(url="https://github.com/JuliaLinearAlgebra/MultiThreadedLU.jl")
 Pkg.test("MultiThreadedLU")
 ```
 
